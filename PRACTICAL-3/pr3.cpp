@@ -1,253 +1,123 @@
 #include <iostream>
 #include <fstream>
-#include <string>
-#include <vector>
-#include <unordered_set>
 #include <cctype>
-
+#include <unordered_set>
+#include <unordered_map>
+#include <vector>
+#include <regex>
 using namespace std;
 
-struct Token
-{
+// Keywords in C
+unordered_set<string> keywords = {"int", "char", "return", "void", "long", "struct", "float"};
+
+// Operators and punctuation symbols
+unordered_set<char> operators = {'+', '-', '*', '/', '=', '&', '|', '!', '<', '>'};
+unordered_set<char> punctuation = {';', ',', '(', ')', '{', '}', '[', ']'};
+
+// Symbol Table
+unordered_set<string> symbolTable;
+vector<string> lexicalErrors;
+
+// Token Structure
+struct Token {
     string type;
     string value;
 };
 
-struct SymbolTableEntry
-{
-    string name;
-};
+vector<Token> tokens;
 
-class LexicalAnalyzer
-{
-private:
-    vector<Token> tokens;
-    vector<SymbolTableEntry> symbolTable;
-    unordered_set<string> keywords = {"int","printf", "scanf", "char", "return", "void", "struct", "long", "float", "double"};
-    unordered_set<char> operators = {'+', '-', '*', '/', '=', '<', '>', '!', '&', '|'};
-    unordered_set<char> punctuation = {',', ';', '(', ')', '{', '}', '[', ']'};
+bool isIdentifier(const string &str) {
+    return regex_match(str, regex("[a-zA-Z_][a-zA-Z0-9_]*"));
+}
 
-    bool isKeyword(const string &word)
-    {
-        return keywords.find(word) != keywords.end();
+bool isConstant(const string &str) {
+    return regex_match(str, regex("[0-9]+(\\.[0-9]+)?"));
+}
+
+void processToken(const string &token) {
+    if (keywords.count(token)) {
+        tokens.push_back({"Keyword", token});
+    } else if (isConstant(token)) {
+        tokens.push_back({"Constant", token});
+    } else if (isIdentifier(token)) {
+        tokens.push_back({"Identifier", token});
+        symbolTable.insert(token);
+    } else {
+        lexicalErrors.push_back(token + " invalid lexeme");
     }
+}
 
-    bool isOperator(char ch)
-    {
-        return operators.find(ch) != operators.end();
-    }
+void lexicalAnalyzer(const string &code) {
+    string token;
+    bool inString = false;
+    char prevChar = '\0';
 
-    bool isPunctuation(char ch)
-    {
-        return punctuation.find(ch) != punctuation.end();
-    }
-
-    void addToSymbolTable(const string &identifier)
-    {
-        if (identifier == "main")
-            return; // Do not add 'main' to the symbol table
-    
-        for (const auto &entry : symbolTable)
-        {
-            if (entry.name == identifier)
-                return; // Avoid duplicates
+    for (size_t i = 0; i < code.size(); ++i) {
+        char ch = code[i];
+        if (ch == '"' || ch == '\'') {
+            inString = !inString;
+            tokens.push_back({"String", string(1, ch)});
+            continue;
         }
-        symbolTable.push_back({identifier});
-    }
-    
 
-    void reportLexicalError(const string &lexeme)
-    {
-        cout << "LEXICAL ERROR: Invalid lexeme \"" << lexeme << "\"\n";
-    }
+        if (inString) {
+            token += ch;
+            continue;
+        }
 
-public:
-    void stripComments(const string &sourceCode, string &cleanedCode)
-    {
-        size_t i = 0;
-        while (i < sourceCode.length())
-        {
-            if (sourceCode[i] == '/' && sourceCode[i + 1] == '/')
-            {
-                // Single-line comment
-                while (i < sourceCode.length() && sourceCode[i] != '\n')
-                    i++;
+        if (isspace(ch) || punctuation.count(ch) || operators.count(ch)) {
+            if (!token.empty()) {
+                processToken(token);
+                token.clear();
             }
-            else if (sourceCode[i] == '/' && sourceCode[i + 1] == '*')
-            {
-                // Multi-line comment
-                i += 2;
-                while (i < sourceCode.length() && !(sourceCode[i] == '*' && sourceCode[i + 1] == '/'))
-                    i++;
-                i += 2;
+            if (punctuation.count(ch)) {
+                tokens.push_back({"Punctuation", string(1, ch)});
+            } else if (operators.count(ch)) {
+                tokens.push_back({"Operator", string(1, ch)});
             }
-            else
-            {
-                cleanedCode += sourceCode[i++];
-            }
+        } else {
+            token += ch;
         }
     }
 
-    void tokenize(const string &sourceCode)
-    {
-        string lexeme;
-        size_t i = 0;
-
-        while (i < sourceCode.length())
-        {
-            if (isspace(sourceCode[i]))
-            {
-                i++;
-                continue;
-            }
-
-            // Keywords and identifiers
-            if (isalpha(sourceCode[i]) || sourceCode[i] == '_')
-            {
-                lexeme.clear();
-                while (i < sourceCode.length() && (isalnum(sourceCode[i]) || sourceCode[i] == '_'))
-                {
-                    lexeme += sourceCode[i++];
-                }
-
-                if (isKeyword(lexeme))
-                {
-                    tokens.push_back({"Keyword", lexeme});
-                }
-                else
-                {
-                    tokens.push_back({"Identifier", lexeme});
-                    addToSymbolTable(lexeme);
-                }
-                continue;
-            }
-
-            // Numeric constants
-            if (isdigit(sourceCode[i]))
-            {
-                lexeme.clear();
-                while (i < sourceCode.length() && isdigit(sourceCode[i]))
-                {
-                    lexeme += sourceCode[i++];
-                }
-
-                if (i < sourceCode.length() && isalpha(sourceCode[i]))
-                {
-                    // Handle invalid numeric constants like 7H
-                    while (i < sourceCode.length() && (isalnum(sourceCode[i]) || sourceCode[i] == '_'))
-                    {
-                        lexeme += sourceCode[i++];
-                    }
-                    reportLexicalError(lexeme);
-                }
-                else
-                {
-                    tokens.push_back({"Constant", lexeme});
-                }
-                continue;
-            }
-
-            // String and character literals
-            if (sourceCode[i] == '\'' || sourceCode[i] == '\"')
-            {
-                char quoteType = sourceCode[i++];
-                lexeme = quoteType;
-
-                while (i < sourceCode.length() && sourceCode[i] != quoteType)
-                {
-                    lexeme += sourceCode[i++];
-                }
-
-                if (i < sourceCode.length() && sourceCode[i] == quoteType)
-                {
-                    lexeme += sourceCode[i++];
-                    tokens.push_back({"String", lexeme});
-                }
-                else
-                {
-                    reportLexicalError(lexeme); // Unterminated string/character literal
-                }
-                continue;
-            }
-
-            // Operators
-            if (isOperator(sourceCode[i]))
-            {
-                tokens.push_back({"Operator", string(1, sourceCode[i])});
-                i++;
-                continue;
-            }
-
-            // Punctuation
-            if (isPunctuation(sourceCode[i]))
-            {
-                tokens.push_back({"Punctuation", string(1, sourceCode[i])});
-                i++;
-                continue;
-            }
-
-            // Invalid characters
-            lexeme.clear();
-            while (i < sourceCode.length() && !isspace(sourceCode[i]) &&
-                   !isOperator(sourceCode[i]) && !isPunctuation(sourceCode[i]))
-            {
-                lexeme += sourceCode[i++];
-            }
-            reportLexicalError(lexeme);
-        }
+    if (!token.empty()) {
+        processToken(token);
     }
+}
 
-    void displayTokens()
-    {
-        cout << "TOKENS:\n";
-        for (const auto &token : tokens)
-        {
-            cout << token.type << ": " << token.value << endl;
-        }
-    }
-
-    void displaySymbolTable()
-    {
-        cout << "\nSYMBOL TABLE ENTRIES:\n";
-        for (size_t i = 0; i < symbolTable.size(); i++)
-        {
-            cout << i + 1 << ") " << symbolTable[i].name << endl;
-        }
-    }
-};
-
-int main()
-{
-    string inputFileName, sourceCode, cleanedCode;
-    ifstream inputFile;
-
-    cout << "Enter the input file name: ";
-    cin >> inputFileName;
-
-    inputFile.open(inputFileName);
-    if (!inputFile.is_open())
-    {
-        cerr << "Error: Could not open file " << inputFileName << endl;
+int main() {
+    ifstream file("input.c");
+    if (!file) {
+        cerr << "Error: Cannot open file!" << endl;
         return 1;
     }
 
-    sourceCode.assign((istreambuf_iterator<char>(inputFile)), istreambuf_iterator<char>());
-    inputFile.close();
+    string code, line;
+    while (getline(file, line)) {
+        size_t pos;
+        if ((pos = line.find("//")) != string::npos) {
+            line = line.substr(0, pos);
+        }
+        code += line + " ";
+    }
+    file.close();
 
-    LexicalAnalyzer lexer;
+    lexicalAnalyzer(code);
 
-    // Strip comments
-    lexer.stripComments(sourceCode, cleanedCode);
+    cout << "TOKENS\n";
+    for (const auto &token : tokens) {
+        cout << token.type << ": " << token.value << endl;
+    }
 
-    // Tokenize
-    lexer.tokenize(cleanedCode);
+    cout << "\nLEXICAL ERRORS\n";
+    for (const auto &error : lexicalErrors) {
+        cout << error << endl;
+    }
 
-    // Display results
-    lexer.displayTokens();
-    lexer.displaySymbolTable();
-
+    cout << "\nSYMBOL TABLE ENTRIES\n";
+    int index = 1;
+    for (const auto &symbol : symbolTable) {
+        cout << index++ << ") " << symbol << endl;
+    }
     return 0;
 }
-
-/*
- */
